@@ -1,66 +1,83 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\API;
 
+use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSaleRequest;
 use App\Http\Requests\UpdateSaleRequest;
+use App\Http\Resources\SaleResource;
+use App\Models\Product;
 use App\Models\Sale;
+use Illuminate\Support\Facades\DB;
 
 class SaleController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index()
     {
-        //
+        return SaleResource::collection(Sale::all());
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
-
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(StoreSaleRequest $request)
     {
-        //
+        try {
+            DB::beginTransaction();
+            $amount = 0;
+            $sale = Sale::create([
+                'id' => Sale::generateId(),
+            ]);
+
+            foreach ($request->products as $key => $value) {
+                $product = Product::find($value['product_id']);
+                $sale->products()->attach($product->id, ['quantity' => $value['quantity']]);
+
+                $amount += $product->price * $value['quantity'];
+            }
+
+            $sale->amount = $amount;
+            $sale->save();
+
+            DB::commit();
+            return new SaleResource($sale);
+        } catch (\Throwable $th) {
+            DB::rollBack();
+
+            return response()->json(['message' => $th->getMessage()], 500);
+        }
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(Sale $sale)
     {
-        //
+        return new SaleResource($sale);
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Sale $sale)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(UpdateSaleRequest $request, Sale $sale)
     {
-        //
+
+        try {
+            DB::beginTransaction();
+
+            foreach ($request->products as $key => $value) {
+                $product = Product::find($value['product_id']);
+                $sale->products()->attach($product->id, ['quantity' => $value['quantity']]);
+
+                $sale->amount += $product->price * $value['quantity'];
+            }
+
+            $sale->save();
+
+            DB::commit();
+            return new SaleResource($sale);
+        } catch (\Throwable $th) {
+            DB::rollBack();
+
+            return response()->json(['message' => $th->getMessage()], 500);
+        }
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Sale $sale)
     {
-        //
+        $sale->delete();
+
+        return response()->json(['message' => 'Sale deleted successfully'], 200);
     }
 }
