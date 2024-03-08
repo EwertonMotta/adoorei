@@ -8,35 +8,31 @@ use App\Http\Requests\UpdateSaleRequest;
 use App\Http\Resources\SaleResource;
 use App\Models\Product;
 use App\Models\Sale;
+use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class SaleController extends Controller
 {
-    public function index()
+    public function index(): ResourceCollection
     {
         return SaleResource::collection(Sale::all());
     }
 
-    public function store(StoreSaleRequest $request)
+    public function store(StoreSaleRequest $request): JsonResource|JsonResponse
     {
         try {
             DB::beginTransaction();
-            $amount = 0;
+
             $sale = Sale::create([
                 'id' => Sale::generateId(),
             ]);
 
-            foreach ($request->products as $key => $value) {
-                $product = Product::find($value['product_id']);
-                $sale->products()->attach($product->id, ['quantity' => $value['quantity']]);
-
-                $amount += $product->price * $value['quantity'];
-            }
-
-            $sale->amount = $amount;
-            $sale->save();
+            $this->updateSaleAmount($sale, $request->products);
 
             DB::commit();
+
             return new SaleResource($sale);
         } catch (\Throwable $th) {
             DB::rollBack();
@@ -45,27 +41,20 @@ class SaleController extends Controller
         }
     }
 
-    public function show(Sale $sale)
+    public function show(Sale $sale): JsonResource
     {
         return new SaleResource($sale);
     }
 
-    public function update(UpdateSaleRequest $request, Sale $sale)
+    public function update(UpdateSaleRequest $request, Sale $sale): JsonResource|JsonResponse
     {
-
         try {
             DB::beginTransaction();
 
-            foreach ($request->products as $key => $value) {
-                $product = Product::find($value['product_id']);
-                $sale->products()->attach($product->id, ['quantity' => $value['quantity']]);
-
-                $sale->amount += $product->price * $value['quantity'];
-            }
-
-            $sale->save();
+            $this->updateSaleAmount($sale, $request->products);
 
             DB::commit();
+
             return new SaleResource($sale);
         } catch (\Throwable $th) {
             DB::rollBack();
@@ -74,10 +63,31 @@ class SaleController extends Controller
         }
     }
 
-    public function destroy(Sale $sale)
+    public function destroy(Sale $sale): JsonResponse
     {
         $sale->delete();
 
         return response()->json(['message' => 'Sale deleted successfully'], 200);
+    }
+
+    private function updateSaleAmount(Sale $sale, array $products): void
+    {
+        foreach ($products as $value) {
+            $product = Product::find($value['product_id']);
+            $saleProduct = $sale->products()->find($value['product_id']);
+
+            $sale->amount += $product->price * $value['quantity'];
+
+            if ($saleProduct) {
+                $sale->products()
+                    ->updateExistingPivot($value['product_id'], ['quantity' => $saleProduct->pivot->quantity + $value['quantity']]);
+
+                continue;
+            }
+
+            $sale->products()->attach($product->id, ['quantity' => $value['quantity']]);
+        }
+
+        $sale->save();
     }
 }
